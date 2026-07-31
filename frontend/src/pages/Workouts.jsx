@@ -13,6 +13,7 @@ import {
   Trophy,
   CalendarDays,
   BookMarked,
+  Sparkles,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -73,6 +74,13 @@ export default function Workouts() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [libMsg, setLibMsg] = useState('')
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiForm, setAiForm] = useState({ days: 1, focus: 'balanced' })
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [aiResult, setAiResult] = useState(null)
+  const [aiTab, setAiTab] = useState(0)
+  const [aiMsg, setAiMsg] = useState('')
 
   const loadWorkouts = () => {
     api
@@ -222,6 +230,67 @@ export default function Workouts() {
     }
   }
 
+  const openAiModal = () => {
+    setAiForm({ days: 1, focus: 'balanced' })
+    setAiError('')
+    setAiResult(null)
+    setAiOpen(true)
+  }
+
+  const generatePlan = async (e) => {
+    e.preventDefault()
+    setAiLoading(true)
+    setAiError('')
+    setAiResult(null)
+    setAiTab(0)
+    try {
+      const res = await api.post('/ai/workout-plan', {
+        days: Number(aiForm.days) || 1,
+        focus: aiForm.focus,
+      })
+      setAiResult(res.data)
+      setAiOpen(false)
+    } catch (err) {
+      setAiError(err.response?.data?.error || 'Could not generate plan')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const openLogFromPlan = (session) => {
+    setError('')
+    setLogForm({
+      name: session.name,
+      type: session.type,
+      duration: session.duration,
+      caloriesBurned: session.caloriesBurned,
+      date: selKey,
+      exerciseId: '',
+    })
+    setLogModal({ open: true, exercise: null })
+  }
+
+  const logPlanDay = async (sessions) => {
+    try {
+      for (const s of sessions) {
+        await api.post('/workouts/add', {
+          name: s.name,
+          type: s.type,
+          duration: s.duration,
+          caloriesBurned: s.caloriesBurned,
+          date: selKey,
+        })
+      }
+      loadWorkouts()
+      setAiMsg(`Logged ${sessions.length} workouts for ${dateLabel} ✓`)
+      setTimeout(() => setAiMsg(''), 3000)
+    } catch (err) {
+      setAiMsg(err.response?.data?.error || 'Could not log workouts')
+    }
+  }
+
+  const closeAi = () => setAiOpen(false)
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -248,6 +317,94 @@ export default function Workouts() {
         <button onClick={() => openLog(null)} className="btn-primary flex items-center gap-2 text-sm">
           <Plus size={16} /> Log Workout
         </button>
+      </div>
+
+      <div className="card border-0 bg-gradient-to-br from-violet-500/15 via-cyan-500/10 to-transparent p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-base font-bold text-(--text-1)">
+              <Sparkles size={18} className="text-violet-500" />
+              AI Workout Planner
+            </h2>
+            <p className="mt-1 text-xs text-(--text-3)">
+              Get a day-by-day workout plan with estimated calories burned, based on your profile and library.
+            </p>
+          </div>
+          <button onClick={openAiModal} className="btn-primary flex items-center gap-2 text-sm">
+            <Sparkles size={15} /> Generate Plan
+          </button>
+        </div>
+
+        {aiMsg && (
+          <div className="mt-3 rounded-lg bg-(--hover) px-3 py-2 text-xs font-medium text-(--text-2)">{aiMsg}</div>
+        )}
+
+        {aiResult && (
+          <div className="mt-5 border-t border-(--border) pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className={`chip ${
+                aiResult.source === 'ai'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              }`}>
+                {aiResult.source === 'ai' ? 'AI Generated' : 'Smart suggestions (offline)'}
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {aiResult.days.map((d, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setAiTab(i)}
+                    className={`chip ${
+                      aiTab === i
+                        ? 'bg-violet-500/15 text-violet-600 dark:text-violet-400'
+                        : 'bg-(--hover) text-(--text-2) hover:text-(--text-1)'
+                    }`}
+                  >
+                    {d.day}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {aiResult.days[aiTab] && (
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {aiResult.days[aiTab].sessions.map((session, i) => {
+                  const Icon = TYPE_ICONS[session.type] || Zap
+                  return (
+                    <div key={i} className="group flex items-center gap-3 rounded-xl bg-(--hover) p-3">
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${TYPE_ACCENTS[session.type]}`}>
+                        <Icon size={16} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-(--text-1)">{session.name}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="text-[11px] font-semibold text-(--text-2)">{session.duration} min</span>
+                          <span className="chip bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                            🔥 {session.caloriesBurned} kcal
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => openLogFromPlan(session)}
+                        title="Log this session"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 transition hover:bg-emerald-500/25 dark:text-emerald-400"
+                      >
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <button
+              onClick={() => logPlanDay(aiResult.days[aiTab].sessions)}
+              className="mt-3 flex items-center gap-2 text-sm font-semibold text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300"
+            >
+              <Plus size={15} /> Log all {aiResult.days[aiTab].sessions.length} sessions for {dateLabel}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between rounded-2xl border border-(--border) bg-(--card) px-4 py-3">
@@ -525,6 +682,73 @@ export default function Workouts() {
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-900/30 border-t-slate-900" />
             ) : (
               <>Save workout <Plus size={16} /></>
+            )}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={aiOpen} onClose={closeAi} title="Generate AI Workout Plan">
+        <form onSubmit={generatePlan} className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-(--text-3)">Number of days</label>
+            <div className="flex gap-2">
+              {[1, 3, 7].map((d) => (
+                <button
+                  type="button"
+                  key={d}
+                  onClick={() => setAiForm({ ...aiForm, days: d })}
+                  className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                    aiForm.days === d
+                      ? 'border-violet-500/60 bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                      : 'border-(--border) text-(--text-2) hover:bg-(--hover)'
+                  }`}
+                >
+                  {d} day{d > 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-(--text-3)">Focus</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: 'balanced', label: 'Balanced' },
+                { key: 'cardio', label: 'Cardio' },
+                { key: 'strength', label: 'Strength' },
+                { key: 'flexibility', label: 'Flexibility' },
+              ].map((o) => (
+                <button
+                  type="button"
+                  key={o.key}
+                  onClick={() => setAiForm({ ...aiForm, focus: o.key })}
+                  className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                    aiForm.focus === o.key
+                      ? 'border-violet-500/60 bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                      : 'border-(--border) text-(--text-2) hover:bg-(--hover)'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {aiError && (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-300">
+              {aiError}
+            </div>
+          )}
+
+          <button type="submit" disabled={aiLoading} className="btn-primary flex w-full items-center justify-center gap-2">
+            {aiLoading ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-900/30 border-t-slate-900" />
+                Generating…
+              </>
+            ) : (
+              <>
+                <Sparkles size={16} /> Generate Plan
+              </>
             )}
           </button>
         </form>

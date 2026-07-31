@@ -16,6 +16,7 @@ import {
   Moon,
   Apple,
   CheckCircle2,
+  Sparkles,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -106,6 +107,14 @@ export default function Meals() {
   const [error, setError] = useState('')
   const [libMsg, setLibMsg] = useState('')
   const addedTimer = useRef(null)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiForm, setAiForm] = useState({ days: 1, calorieTarget: '', dietaryPreference: 'veg' })
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [aiResult, setAiResult] = useState(null)
+  const [aiTab, setAiTab] = useState(0)
+  const [aiMsg, setAiMsg] = useState('')
+  const aiMsgTimer = useRef(null)
 
   const loadMeals = () => {
     api
@@ -124,7 +133,10 @@ export default function Meals() {
 
   useEffect(() => {
     Promise.all([loadMeals(), loadLibrary()])
-    return () => clearTimeout(addedTimer.current)
+    return () => {
+      clearTimeout(addedTimer.current)
+      clearTimeout(aiMsgTimer.current)
+    }
   }, [])
 
   const selKey = localDateKey(selectedDate)
@@ -257,6 +269,74 @@ export default function Meals() {
     }
   }
 
+  const suggestedGoal = () => {
+    const w = Number(user?.weightKg) || 70
+    const h = Number(user?.heightCm) || 170
+    const a = Number(user?.age) || 25
+    const base = 10 * w + 6.25 * h - 5 * a
+    const bmr = user?.gender === 'female' ? base - 161 : base + 5
+    const factors = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, veryActive: 1.9 }
+    return Math.round((bmr * (factors[user?.activityLevel] || 1.55) - 500) / 50) * 50
+  }
+
+  const openAiModal = () => {
+    setAiForm({ days: 1, calorieTarget: '', dietaryPreference: 'veg' })
+    setAiError('')
+    setAiResult(null)
+    setAiOpen(true)
+  }
+
+  const generatePlan = async (e) => {
+    e.preventDefault()
+    setAiLoading(true)
+    setAiError('')
+    setAiResult(null)
+    setAiTab(0)
+    try {
+      const res = await api.post('/ai/meal-plan', {
+        days: Number(aiForm.days) || 1,
+        calorieTarget: Number(aiForm.calorieTarget) || undefined,
+        dietaryPreference: aiForm.dietaryPreference,
+      })
+      setAiResult(res.data)
+      setAiOpen(false)
+    } catch (err) {
+      setAiError(err.response?.data?.error || 'Could not generate plan')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const flashAiMsg = (msg) => {
+    setAiMsg(msg)
+    clearTimeout(aiMsgTimer.current)
+    aiMsgTimer.current = setTimeout(() => setAiMsg(''), 3000)
+  }
+
+  const savePlanMeal = async (meal) => {
+    try {
+      await api.post('/saved-meals/add', meal)
+      loadLibrary()
+      flashAiMsg(`Saved "${meal.name}" to your library ✓`)
+    } catch (err) {
+      flashAiMsg(err.response?.data?.error || 'Could not save meal')
+    }
+  }
+
+  const addPlanDay = async (meals) => {
+    try {
+      for (const m of meals) {
+        await api.post('/meals/add', { ...m, date: selKey })
+      }
+      loadMeals()
+      flashAiMsg(`Added ${meals.length} meals to ${dateLabel} ✓`)
+    } catch (err) {
+      flashAiMsg(err.response?.data?.error || 'Could not add meals')
+    }
+  }
+
+  const closeAi = () => setAiOpen(false)
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -283,6 +363,97 @@ export default function Meals() {
         <button onClick={openAddModal} className="btn-primary flex items-center gap-2 text-sm">
           <Plus size={16} /> Add Meal
         </button>
+      </div>
+
+      <div className="card border-0 bg-gradient-to-br from-emerald-500/15 via-cyan-500/10 to-transparent p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-base font-bold text-(--text-1)">
+              <Sparkles size={18} className="text-emerald-500" />
+              AI Meal Planner
+            </h2>
+            <p className="mt-1 text-xs text-(--text-3)">
+              Generate a full day of veg/non-veg Indian meals with macros, matched to your calorie goal.
+            </p>
+          </div>
+          <button onClick={openAiModal} className="btn-primary flex items-center gap-2 text-sm">
+            <Sparkles size={15} /> Generate Plan
+          </button>
+        </div>
+
+        {aiMsg && (
+          <div className="mt-3 rounded-lg bg-(--hover) px-3 py-2 text-xs font-medium text-(--text-2)">{aiMsg}</div>
+        )}
+
+        {aiResult && (
+          <div className="mt-5 border-t border-(--border) pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className={`chip ${
+                  aiResult.source === 'ai'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                }`}>
+                  {aiResult.source === 'ai' ? 'AI Generated' : 'Smart suggestions (offline)'}
+                </span>
+                <span className="text-xs text-(--text-3)">{aiResult.calorieTarget} kcal goal</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {aiResult.days.map((d, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setAiTab(i)}
+                    className={`chip ${
+                      aiTab === i
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-(--hover) text-(--text-2) hover:text-(--text-1)'
+                    }`}
+                  >
+                    {d.day}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {aiResult.days[aiTab] && (
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {aiResult.days[aiTab].meals.map((meal, i) => {
+                  const Icon = MEAL_ICONS[meal.mealType] || Apple
+                  return (
+                    <div key={i} className="group flex items-center gap-3 rounded-xl bg-(--hover) p-3">
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${MEAL_ACCENTS[meal.mealType]}`}>
+                        <Icon size={16} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-(--text-1)">{meal.name}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="text-[11px] font-semibold text-(--text-2)">{meal.calories} kcal</span>
+                          <span className="chip bg-rose-500/10 text-rose-600 dark:text-rose-400">P {meal.protein}g</span>
+                          <span className="chip bg-amber-500/10 text-amber-600 dark:text-amber-400">C {meal.carbs}g</span>
+                          <span className="chip bg-cyan-500/10 text-cyan-600 dark:text-cyan-400">F {meal.fat}g</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => savePlanMeal(meal)}
+                        title="Save to library"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 transition hover:bg-emerald-500/25 dark:text-emerald-400"
+                      >
+                        <BookMarked size={15} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <button
+              onClick={() => addPlanDay(aiResult.days[aiTab].meals)}
+              className="mt-3 flex items-center gap-2 text-sm font-semibold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              <Plus size={15} /> Add all {aiResult.days[aiTab].meals.length} meals to {dateLabel}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between rounded-2xl border border-(--border) bg-(--card) px-4 py-3">
@@ -541,6 +712,83 @@ export default function Meals() {
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-900/30 border-t-slate-900" />
             ) : (
               <>Save meal <Plus size={16} /></>
+            )}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={aiOpen} onClose={closeAi} title="Generate AI Meal Plan">
+        <form onSubmit={generatePlan} className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-(--text-3)">Number of days</label>
+            <div className="flex gap-2">
+              {[1, 3, 7].map((d) => (
+                <button
+                  type="button"
+                  key={d}
+                  onClick={() => setAiForm({ ...aiForm, days: d })}
+                  className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                    aiForm.days === d
+                      ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'border-(--border) text-(--text-2) hover:bg-(--hover)'
+                  }`}
+                >
+                  {d} day{d > 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-(--text-3)">Calorie target</label>
+            <input
+              type="number"
+              min="1200"
+              max="4000"
+              className="input"
+              placeholder={`Auto (${suggestedGoal()} kcal)`}
+              value={aiForm.calorieTarget}
+              onChange={(e) => setAiForm({ ...aiForm, calorieTarget: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-(--text-3)">Diet</label>
+            <div className="flex gap-2">
+              {[
+                { key: 'veg', label: 'Vegetarian' },
+                { key: 'nonveg', label: 'Non-veg' },
+              ].map((o) => (
+                <button
+                  type="button"
+                  key={o.key}
+                  onClick={() => setAiForm({ ...aiForm, dietaryPreference: o.key })}
+                  className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                    aiForm.dietaryPreference === o.key
+                      ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'border-(--border) text-(--text-2) hover:bg-(--hover)'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {aiError && (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-300">
+              {aiError}
+            </div>
+          )}
+
+          <button type="submit" disabled={aiLoading} className="btn-primary flex w-full items-center justify-center gap-2">
+            {aiLoading ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-900/30 border-t-slate-900" />
+                Generating…
+              </>
+            ) : (
+              <>
+                <Sparkles size={16} /> Generate Plan
+              </>
             )}
           </button>
         </form>

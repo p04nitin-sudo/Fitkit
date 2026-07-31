@@ -24,6 +24,7 @@ const mealsRouter = require("./routes/meals");
 const workoutsRouter = require("./routes/workouts");
 const savedExercisesRouter = require("./routes/savedExercises");
 const savedMealsRouter = require("./routes/savedMeals");
+const aiRouter = require("./routes/ai");
 
 app.use("/auth", authRouter);
 app.use("/exercises", exercisesRouter);
@@ -32,6 +33,7 @@ app.use("/meals", mealsRouter);
 app.use("/workouts", workoutsRouter);
 app.use("/saved-exercises", savedExercisesRouter);
 app.use("/saved-meals", savedMealsRouter);
+app.use("/ai", aiRouter);
 
 app.listen(port, () => {
   console.log(`Server is running on port: ${port}`);
